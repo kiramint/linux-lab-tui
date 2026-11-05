@@ -4,45 +4,71 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// feedKey forwards a Bubble Tea key to the PTY when the shell pane is focused.
+// Esc / Ctrl+[ must reach the PTY as 0x1b so programs like vim can leave insert
+// mode; bare Esc is never used to blur focus or quit (use Ctrl+Q to quit).
 func (m *Model) feedKey(msg tea.KeyMsg) {
+	b := keyToPTYBytes(msg)
+	if len(b) == 0 {
+		return
+	}
+	if msg.Type == tea.KeyCtrlL {
+		m.scrollOffset = 0
+	}
+	m.session.HandleInput(b)
+}
+
+// keyToPTYBytes maps a Bubble Tea key message to bytes for the PTY.
+// Returns nil when the key should be ignored (not forwarded).
+func keyToPTYBytes(msg tea.KeyMsg) []byte {
 	switch msg.Type {
 	case tea.KeyEnter:
-		m.session.HandleInput([]byte{'\n'})
+		return []byte{'\n'}
 	case tea.KeyTab:
-		// Pass Tab through for shell completion
-		m.session.HandleInput([]byte{'\t'})
+		return []byte{'\t'}
 	case tea.KeyBackspace:
-		m.session.HandleInput([]byte{0x7f})
+		return []byte{0x7f}
+	case tea.KeyEsc:
+		// KeyEscape and KeyCtrlOpenBracket are aliases of KeyEsc (ASCII 27)
+		// in bubbletea, so one case covers Esc and Ctrl+[.
+		return []byte{0x1b}
 	case tea.KeyCtrlD:
-		m.session.HandleInput([]byte{0x04})
+		return []byte{0x04}
 	case tea.KeyCtrlU:
-		m.session.HandleInput([]byte{0x15})
+		return []byte{0x15}
 	case tea.KeyCtrlL:
-		// clear: bash/readline emits CSI sequences that vt10x handles
-		m.session.HandleInput([]byte{0x0c})
-		m.scrollOffset = 0
+		return []byte{0x0c}
 	case tea.KeySpace:
-		m.session.HandleInput([]byte{' '})
+		return []byte{' '}
 	case tea.KeyRunes:
-		m.session.HandleInput([]byte(string(msg.Runes)))
+		return []byte(string(msg.Runes))
 	case tea.KeyUp:
-		m.session.HandleInput([]byte{0x1b, '[', 'A'})
+		return []byte{0x1b, '[', 'A'}
 	case tea.KeyDown:
-		m.session.HandleInput([]byte{0x1b, '[', 'B'})
+		return []byte{0x1b, '[', 'B'}
 	case tea.KeyRight:
-		m.session.HandleInput([]byte{0x1b, '[', 'C'})
+		return []byte{0x1b, '[', 'C'}
 	case tea.KeyLeft:
-		m.session.HandleInput([]byte{0x1b, '[', 'D'})
+		return []byte{0x1b, '[', 'D'}
 	case tea.KeyHome:
-		m.session.HandleInput([]byte{0x1b, '[', 'H'})
+		return []byte{0x1b, '[', 'H'}
 	case tea.KeyEnd:
-		m.session.HandleInput([]byte{0x1b, '[', 'F'})
+		return []byte{0x1b, '[', 'F'}
 	case tea.KeyCtrlC:
-		m.session.HandleInput([]byte{0x03})
+		return []byte{0x03}
 	default:
-		s := msg.String()
+		return keyToPTYBytesFromString(msg.String())
+	}
+}
+
+func keyToPTYBytesFromString(s string) []byte {
+	switch s {
+	case "esc", "escape", "ctrl+[":
+		return []byte{0x1b}
+	default:
 		if len(s) == 1 {
-			m.session.HandleInput([]byte(s))
+			return []byte(s)
 		}
+		return nil
 	}
 }

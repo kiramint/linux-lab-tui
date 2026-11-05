@@ -22,11 +22,11 @@ GitHub Actions 会在推送 `v*` 标签时交叉编译 **linux/amd64** 与 **lin
 
 ```bash
 # AMD64（常见 x86_64 Ubuntu / 云主机）
-curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.1/linux-lab-linux-amd64
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.2/linux-lab-linux-amd64
 chmod +x linux-lab-linux-amd64 && ./linux-lab-linux-amd64
 
 # ARM64（树莓派 / 部分云主机）
-curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.1/linux-lab-linux-arm64
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.2/linux-lab-linux-arm64
 chmod +x linux-lab-linux-arm64 && ./linux-lab-linux-arm64
 ```
 
@@ -71,8 +71,11 @@ CI（`.github/workflows/ci.yml`）在 `main` 的 push/PR 上会跑 `go test ./..
 | `Ctrl+S` 或 `s` | 交卷 |
 | `Ctrl+Q` | 退出（未交卷会确认） |
 | `Ctrl+C` | Shell 焦点下发送给 bash |
+| `Esc` / `Ctrl+[` | Shell 焦点下发给 PTY（不会退出程序或切焦点） |
 
 聚焦 Shell 时右边框高亮，并显示闪烁块光标。
+
+**vim 提示**：退出 vim 用 `Esc` 后输入 `:q`（或 `:wq`）；若仍异常可用 `Ctrl+[`（终端里与 Esc 等价）。退出本测验程序请用 `Ctrl+Q`，不要用 Esc。
 
 ### 交卷产物
 
@@ -118,7 +121,7 @@ Go · [bubbletea](https://github.com/charmbracelet/bubbletea) · lipgloss · [cr
 - 嵌套在非 TTY / CI 中无法完整体验 TUI（可用 `list` / 单元测试 / `test-blocklist`）。
 - Shell 输入按行做危险命令检测；复杂多行/特殊转义场景以练习题为准。
 - openssh 相关题依赖学生机权限与网络（apt）。
-- VT 仿真覆盖常用序列（清屏、光标、颜色、换行卷动）；完整 xterm 私有序列 / 复杂全屏 TUI（vim/htop）未作为考试目标保证。
+- VT 仿真覆盖常用序列（清屏、光标、颜色、换行卷动）；完整 xterm 私有序列 / 复杂全屏 TUI（htop 等）未作为考试目标保证；vim 基本进出（Esc / Ctrl+[、:q）应可用。
 - 回滚缓冲是滚出屏幕后的纯文本行，不含完整单元格属性。
 
 ## License

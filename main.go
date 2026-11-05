@@ -22,7 +22,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "-v", "--version":
-			fmt.Println("linux-lab 0.1.1")
+			fmt.Println("linux-lab 0.1.2")
 			return
 		case "help", "-h", "--help":
 			printHelp()
@@ -125,6 +125,7 @@ func printHelp() {
   n / p        下一题 / 上一题（题目焦点）
   Ctrl+Q       退出（未交卷会确认）
   Ctrl+C       在 Shell 焦点下转发给 bash
+  Esc / Ctrl+[ Shell 焦点下发给 PTY（退出 vim 插入模式等）；退出程序请用 Ctrl+Q
 
 安全:
   禁止 dd / fdisk / cfdisk / parted / --no-preserve-root / rm -rf /

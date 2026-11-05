@@ -10,6 +10,24 @@
 
 面向 **Ubuntu 24.04** 学生环境。
 
+## 下载预编译二进制（推荐）
+
+GitHub Actions 会在推送 `v*` 标签时交叉编译 **linux/amd64** 与 **linux/arm64**，并发布到 [Releases](https://github.com/kiramint/linux-lab-tui/releases)：
+
+- `linux-lab-linux-amd64`
+- `linux-lab-linux-arm64`
+- `SHA256SUMS`
+
+示例（x86_64 Ubuntu）：
+
+```bash
+# 从 Releases 页面下载对应文件后：
+chmod +x linux-lab-linux-amd64
+./linux-lab-linux-amd64
+```
+
+也可用 Actions 的 **workflow_dispatch** 手动触发 Release 工作流（可选填标签名）。
+
 ## 编译
 
 ```bash
@@ -21,6 +39,8 @@ go build -o linux-lab .
 ```
 
 需要 Go 1.22+。
+
+CI（`.github/workflows/ci.yml`）在 `main` 的 push/PR 上会跑 `go test ./...` 与 `go build`；正式产物由 `.github/workflows/release.yml` 构建。
 
 ## 运行
 

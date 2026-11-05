@@ -1,0 +1,5 @@
+/linux-lab
+*.exe
+*.test
+.idea/
+.vscode/

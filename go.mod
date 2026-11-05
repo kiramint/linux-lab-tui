@@ -1,6 +1,6 @@
 module github.com/kiramint/linux-lab-tui
 
-go 1.27.3
+go 1.22
 
 require (
 	github.com/charmbracelet/bubbles v0.20.0

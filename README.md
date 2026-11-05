@@ -18,12 +18,16 @@ GitHub Actions 会在推送 `v*` 标签时交叉编译 **linux/amd64** 与 **lin
 - `linux-lab-linux-arm64`
 - `SHA256SUMS`
 
-示例（x86_64 Ubuntu）：
+示例：
 
 ```bash
-# 从 Releases 页面下载对应文件后：
-chmod +x linux-lab-linux-amd64
-./linux-lab-linux-amd64
+# AMD64（常见 x86_64 Ubuntu / 云主机）
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.0/linux-lab-linux-amd64
+chmod +x linux-lab-linux-amd64 && ./linux-lab-linux-amd64
+
+# ARM64（树莓派 / 部分云主机）
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.0/linux-lab-linux-arm64
+chmod +x linux-lab-linux-arm64 && ./linux-lab-linux-arm64
 ```
 
 也可用 Actions 的 **workflow_dispatch** 手动触发 Release 工作流（可选填标签名）。
@@ -33,7 +37,10 @@ chmod +x linux-lab-linux-amd64
 ```bash
 git clone https://github.com/kiramint/linux-lab-tui.git
 cd linux-lab-tui
-make build          # 生成 ./linux-lab
+make build              # 生成本机 ./linux-lab
+make build-linux-amd64  # 交叉编译 linux-lab-linux-amd64
+make build-linux-arm64  # 交叉编译 linux-lab-linux-arm64
+make build-all          # 同时打出 amd64 + arm64
 # 或
 go build -o linux-lab .
 ```

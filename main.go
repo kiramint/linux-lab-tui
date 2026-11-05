@@ -22,7 +22,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "-v", "--version":
-			fmt.Println("linux-lab 1.0.0")
+			fmt.Println("linux-lab 0.1.1")
 			return
 		case "help", "-h", "--help":
 			printHelp()
@@ -116,7 +116,10 @@ func printHelp() {
   linux-lab test-blocklist
 
 快捷键:
-  Tab          题目 / Shell 焦点切换
+  Shift+Tab    题目 / Shell 焦点切换
+  Tab          Shell 焦点下交给 bash（补全）
+  Ctrl+L       清屏（clear）
+  PgUp/PgDn    Shell 回滚缓冲
   Ctrl+G       判当前题
   Ctrl+S       交卷（写入 IO history + JSON）
   n / p        下一题 / 上一题（题目焦点）

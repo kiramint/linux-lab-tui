@@ -3,7 +3,7 @@
 基于 [VLA-Tutorial-AGDR](https://github.com/GC-SHIRO/VLA-Tutorial-AGDR) **第二章「Linux终端操作」** 的可交互测验程序。
 
 - **左侧**：题目说明与进度  
-- **右侧**：内嵌真实 bash（PTY）  
+- **右侧**：内嵌真实 bash（PTY）+ **VT10x 终端仿真**（支持 `clear` / Ctrl+L、换行卷动、ANSI 高亮、闪烁光标）  
 - **工作区**：`/tmp/linux-lab-<session>/`  
 - **进度**：`~/.config/linux-lab/progress.json`  
 - **交卷**：完整虚拟终端 IO history + 每题 PASS/FAIL JSON  
@@ -22,11 +22,11 @@ GitHub Actions 会在推送 `v*` 标签时交叉编译 **linux/amd64** 与 **lin
 
 ```bash
 # AMD64（常见 x86_64 Ubuntu / 云主机）
-curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.0/linux-lab-linux-amd64
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.1/linux-lab-linux-amd64
 chmod +x linux-lab-linux-amd64 && ./linux-lab-linux-amd64
 
 # ARM64（树莓派 / 部分云主机）
-curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.0/linux-lab-linux-arm64
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.1/linux-lab-linux-arm64
 chmod +x linux-lab-linux-arm64 && ./linux-lab-linux-arm64
 ```
 
@@ -61,13 +61,18 @@ CI（`.github/workflows/ci.yml`）在 `main` 的 push/PR 上会跑 `go test ./..
 
 | 按键 | 作用 |
 |------|------|
-| `Tab` | 题目区 / Shell 区焦点切换 |
+| `Shift+Tab` | 题目区 / Shell 区焦点切换 |
+| `Tab` | Shell 焦点下交给 bash（命令补全） |
+| `Ctrl+L` | 清屏（与 `clear` 相同，经 VT 仿真处理） |
+| `PgUp` / `PgDn` | Shell 回滚缓冲（查看已滚出屏幕的行） |
 | `Ctrl+G` | 判当前题 |
 | `Enter` / `c` | 判当前题（题目焦点） |
 | `n` / `p` | 下一题 / 上一题 |
 | `Ctrl+S` 或 `s` | 交卷 |
 | `Ctrl+Q` | 退出（未交卷会确认） |
 | `Ctrl+C` | Shell 焦点下发送给 bash |
+
+聚焦 Shell 时右边框高亮，并显示闪烁块光标。
 
 ### 交卷产物
 
@@ -106,13 +111,15 @@ sudo apt-get install -y openssh-server
 
 ## 技术栈
 
-Go · [bubbletea](https://github.com/charmbracelet/bubbletea) · lipgloss · [creack/pty](https://github.com/creack/pty)
+Go · [bubbletea](https://github.com/charmbracelet/bubbletea) · lipgloss · [creack/pty](https://github.com/creack/pty) · [hinshun/vt10x](https://github.com/hinshun/vt10x)（PTY 输出 → VT 网格 → 右栏渲染）
 
 ## 限制说明
 
 - 嵌套在非 TTY / CI 中无法完整体验 TUI（可用 `list` / 单元测试 / `test-blocklist`）。
 - Shell 输入按行做危险命令检测；复杂多行/特殊转义场景以练习题为准。
 - openssh 相关题依赖学生机权限与网络（apt）。
+- VT 仿真覆盖常用序列（清屏、光标、颜色、换行卷动）；完整 xterm 私有序列 / 复杂全屏 TUI（vim/htop）未作为考试目标保证。
+- 回滚缓冲是滚出屏幕后的纯文本行，不含完整单元格属性。
 
 ## License
 

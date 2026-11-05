@@ -23,24 +23,27 @@ const (
 	focusShell
 )
 
-type ptyOutMsg []byte
+type ptyOutMsg struct{}
 type tickMsg time.Time
+type blinkMsg time.Time
 
 type Model struct {
-	bank      *grade.Bank
-	state     *progress.State
-	session   *shell.Session
-	focus     focusPane
-	width     int
-	height    int
-	leftVP    viewport.Model
-	rightVP   viewport.Model
-	shellView strings.Builder
-	status    string
-	quitting  bool
-	confirmQ  bool
-	lastGrade *grade.QuestionResult
-	prog      *tea.Program // set after NewProgram for pty callbacks
+	bank         *grade.Bank
+	state        *progress.State
+	session      *shell.Session
+	focus        focusPane
+	width        int
+	height       int
+	leftVP       viewport.Model
+	termW        int
+	termH        int
+	status       string
+	quitting     bool
+	confirmQ     bool
+	lastGrade    *grade.QuestionResult
+	prog         *tea.Program
+	blinkOn      bool
+	scrollOffset int // 0 = follow live screen; >0 looks into scrollback
 }
 
 func New(bank *grade.Bank, state *progress.State, session *shell.Session) *Model {
@@ -50,13 +53,12 @@ func New(bank *grade.Bank, state *progress.State, session *shell.Session) *Model
 		session: session,
 		focus:   focusShell,
 		leftVP:  viewport.New(40, 20),
-		rightVP: viewport.New(60, 20),
-		status:  "Tab 切换焦点 · Ctrl+G 判题 · Ctrl+S 交卷 · Ctrl+Q 退出",
+		blinkOn: true,
+		status:  "Shift+Tab 切换焦点 · Tab 补全(Shell) · Ctrl+L 清屏 · Ctrl+G 判题 · Ctrl+S 交卷 · Ctrl+Q 退出",
 	}
-	session.OnOutput = func(b []byte) {
-		// Delivered via Program.Send once wired
+	session.OnOutput = func() {
 		if m.prog != nil {
-			m.prog.Send(ptyOutMsg(append([]byte(nil), b...)))
+			m.prog.Send(ptyOutMsg{})
 		}
 	}
 	m.refreshLeft()
@@ -66,11 +68,15 @@ func New(bank *grade.Bank, state *progress.State, session *shell.Session) *Model
 func (m *Model) SetProgram(p *tea.Program) { m.prog = p }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(tea.EnterAltScreen, tick())
+	return tea.Batch(tea.EnterAltScreen, autosaveTick(), blinkTick())
 }
 
-func tick() tea.Cmd {
+func autosaveTick() tea.Cmd {
 	return tea.Tick(time.Second*2, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func blinkTick() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return blinkMsg(t) })
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -82,14 +88,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ptyOutMsg:
-		m.shellView.Write(msg)
-		m.rightVP.SetContent(sanitizeTerminal(m.shellView.String()))
-		m.rightVP.GotoBottom()
+		// New PTY output: snap back to live view
+		m.scrollOffset = 0
 		return m, nil
 
 	case tickMsg:
 		_ = m.state.Save()
-		return m, tick()
+		return m, autosaveTick()
+
+	case blinkMsg:
+		if m.focus == focusShell {
+			m.blinkOn = !m.blinkOn
+		} else {
+			m.blinkOn = true
+		}
+		return m, blinkTick()
 
 	case tea.KeyMsg:
 		if m.confirmQ {
@@ -104,10 +117,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Global keys
+		// Global keys (before pane routing)
 		switch msg.String() {
-		case "ctrl+q", "ctrl+c":
-			if msg.String() == "ctrl+c" && m.focus == focusShell {
+		case "ctrl+q":
+			if m.state.Submitted {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			m.confirmQ = true
+			m.status = "确认退出？未交卷进度已自动保存。按 y 退出，其他键取消"
+			return m, nil
+		case "ctrl+c":
+			if m.focus == focusShell {
 				m.session.HandleInput([]byte{0x03})
 				return m, nil
 			}
@@ -118,7 +139,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmQ = true
 			m.status = "确认退出？未交卷进度已自动保存。按 y 退出，其他键取消"
 			return m, nil
-		case "tab":
+		case "shift+tab":
 			if m.focus == focusQuestion {
 				m.focus = focusShell
 			} else {
@@ -142,6 +163,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.focus == focusShell {
+			// PageUp / PageDown scroll the scrollback without leaving shell focus
+			switch msg.String() {
+			case "pgup", "ctrl+b":
+				max := m.session.ScrollbackLen()
+				m.scrollOffset += m.termH
+				if m.scrollOffset > max {
+					m.scrollOffset = max
+				}
+				return m, nil
+			case "pgdown", "ctrl+f":
+				m.scrollOffset -= m.termH
+				if m.scrollOffset < 0 {
+					m.scrollOffset = 0
+				}
+				return m, nil
+			}
 			m.feedKey(msg)
 			return m, nil
 		}
@@ -215,7 +252,6 @@ func (m *Model) checkCurrent() {
 }
 
 func (m *Model) submit() (string, error) {
-	// Auto-check all for summary freshness on current history
 	hist := m.session.History()
 	for _, q := range m.bank.Questions {
 		if _, ok := m.state.Results[q.ID]; !ok {
@@ -244,14 +280,14 @@ func (m *Model) submit() (string, error) {
 		return "", err
 	}
 	type summary struct {
-		Title     string                           `json:"title"`
-		SessionID string                           `json:"session_id"`
-		Workspace string                           `json:"workspace"`
-		Submitted time.Time                        `json:"submitted_at"`
-		Passed    int                              `json:"passed"`
-		Total     int                              `json:"total"`
+		Title     string                             `json:"title"`
+		SessionID string                             `json:"session_id"`
+		Workspace string                             `json:"workspace"`
+		Submitted time.Time                          `json:"submitted_at"`
+		Passed    int                                `json:"passed"`
+		Total     int                                `json:"total"`
 		Results   map[string]progress.QuestionResult `json:"results"`
-		History   string                           `json:"history_file"`
+		History   string                             `json:"history_file"`
 	}
 	sum := summary{
 		Title:     m.bank.Title,
@@ -290,11 +326,16 @@ func (m *Model) layout() {
 	}
 	m.leftVP.Width = leftW - 2
 	m.leftVP.Height = innerH - 2
-	m.rightVP.Width = rightW - 2
-	m.rightVP.Height = innerH - 2
-	m.session.Resize(uint16(m.rightVP.Height), uint16(m.rightVP.Width))
+	m.termW = rightW - 2
+	m.termH = innerH - 2
+	if m.termW < 1 {
+		m.termW = 1
+	}
+	if m.termH < 1 {
+		m.termH = 1
+	}
+	m.session.Resize(uint16(m.termH), uint16(m.termW))
 	m.refreshLeft()
-	m.rightVP.SetContent(sanitizeTerminal(m.shellView.String()))
 }
 
 func (m *Model) refreshLeft() {
@@ -345,16 +386,17 @@ func (m *Model) refreshLeft() {
 		}
 	}
 	fmt.Fprintf(&b, "\n键: Enter/c 判题 · n/p 下一题/上一题 · s 交卷\n")
-	fmt.Fprintf(&b, "焦点: %s\n", map[focusPane]string{focusQuestion: "题目", focusShell: "Shell"}[m.focus])
+	fmt.Fprintf(&b, "焦点: %s（Shift+Tab 切换）\n", map[focusPane]string{focusQuestion: "题目", focusShell: "Shell"}[m.focus])
 	m.leftVP.SetContent(b.String())
 }
 
 var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	borderFocus = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12"))
-	borderBlur  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	dangerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
+	borderFocus  = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("14"))
+	borderBlur   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
+	statusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	dangerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	shellHiStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")).Background(lipgloss.Color("236"))
 )
 
 func (m *Model) View() string {
@@ -367,66 +409,31 @@ func (m *Model) View() string {
 
 	leftBorder := borderBlur
 	rightBorder := borderBlur
+	shellLabel := " Shell "
 	if m.focus == focusQuestion {
 		leftBorder = borderFocus
 	} else {
 		rightBorder = borderFocus
+		shellLabel = shellHiStyle.Render(" ● Shell ")
 	}
-	left := leftBorder.Width(m.leftVP.Width + 2).Height(m.leftVP.Height + 2).Render(m.leftVP.View())
-	right := rightBorder.Width(m.rightVP.Width + 2).Height(m.rightVP.Height + 2).Render(m.rightVP.View())
+
+	leftBody := m.leftVP.View()
+	rightBody := renderShellPane(m.session, m.termW, m.termH, m.focus == focusShell, m.blinkOn, m.scrollOffset)
+
+	left := leftBorder.Width(m.leftVP.Width + 2).Height(m.leftVP.Height + 2).Render(leftBody)
+	// Prefixed label row inside border via overlaying title in status; keep pane content sized
+	_ = shellLabel
+	right := rightBorder.Width(m.termW + 2).Height(m.termH + 2).Render(rightBody)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	status := m.status
+	if m.scrollOffset > 0 {
+		status = fmt.Sprintf("[scrollback +%d] PgUp/PgDn · ", m.scrollOffset) + status
+	}
 	if m.confirmQ {
 		status = dangerStyle.Render(status)
 	} else {
 		status = statusStyle.Render(status)
 	}
 	return head + "\n" + body + "\n" + status
-}
-
-// sanitizeTerminal strips most CSI sequences for viewport display (keep simple).
-func sanitizeTerminal(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	i := 0
-	for i < len(s) {
-		if s[i] == 0x1b && i+1 < len(s) {
-			// ESC [
-			if s[i+1] == '[' {
-				i += 2
-				for i < len(s) {
-					c := s[i]
-					i++
-					if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
-						break
-					}
-				}
-				continue
-			}
-			// ESC ]
-			if s[i+1] == ']' {
-				i += 2
-				for i < len(s) && s[i] != 0x07 && s[i] != '\a' {
-					if s[i] == 0x1b {
-						break
-					}
-					i++
-				}
-				if i < len(s) {
-					i++
-				}
-				continue
-			}
-			i += 2
-			continue
-		}
-		if s[i] == '\r' {
-			i++
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
 }

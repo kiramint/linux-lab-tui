@@ -8,12 +8,19 @@ func (m *Model) feedKey(msg tea.KeyMsg) {
 	switch msg.Type {
 	case tea.KeyEnter:
 		m.session.HandleInput([]byte{'\n'})
+	case tea.KeyTab:
+		// Pass Tab through for shell completion
+		m.session.HandleInput([]byte{'\t'})
 	case tea.KeyBackspace:
 		m.session.HandleInput([]byte{0x7f})
 	case tea.KeyCtrlD:
 		m.session.HandleInput([]byte{0x04})
 	case tea.KeyCtrlU:
 		m.session.HandleInput([]byte{0x15})
+	case tea.KeyCtrlL:
+		// clear: bash/readline emits CSI sequences that vt10x handles
+		m.session.HandleInput([]byte{0x0c})
+		m.scrollOffset = 0
 	case tea.KeySpace:
 		m.session.HandleInput([]byte{' '})
 	case tea.KeyRunes:
@@ -26,10 +33,13 @@ func (m *Model) feedKey(msg tea.KeyMsg) {
 		m.session.HandleInput([]byte{0x1b, '[', 'C'})
 	case tea.KeyLeft:
 		m.session.HandleInput([]byte{0x1b, '[', 'D'})
+	case tea.KeyHome:
+		m.session.HandleInput([]byte{0x1b, '[', 'H'})
+	case tea.KeyEnd:
+		m.session.HandleInput([]byte{0x1b, '[', 'F'})
 	case tea.KeyCtrlC:
 		m.session.HandleInput([]byte{0x03})
 	default:
-		// Single printable via String(), ignore named chords
 		s := msg.String()
 		if len(s) == 1 {
 			m.session.HandleInput([]byte(s))

@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/creack/pty v1.1.23
+	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	gopkg.in/yaml.v3 v3.0.1
 )
 

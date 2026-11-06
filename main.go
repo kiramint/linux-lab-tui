@@ -22,7 +22,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "-v", "--version":
-			fmt.Println("linux-lab 0.1.2")
+			fmt.Println("linux-lab 0.2.0")
 			return
 		case "help", "-h", "--help":
 			printHelp()
@@ -34,15 +34,17 @@ func main() {
 				os.Exit(1)
 			}
 			for i, q := range bank.Questions {
-				sudo := ""
+				tags := ""
 				if q.NeedsSudo {
-					sudo = " [sudo]"
+					tags += " [sudo]"
 				}
-				fmt.Printf("%2d. %s — %s%s\n", i+1, q.ID, q.Title, sudo)
+				if q.Bonus {
+					tags += " [附加]"
+				}
+				fmt.Printf("%2d. %s — %s%s\n", i+1, q.ID, q.Title, tags)
 			}
 			return
 		case "test-blocklist":
-			// quick manual check used in smoke tests
 			samples := []string{"dd if=/dev/zero", "fdisk -l", "cfdisk", "parted", "rm -rf / --no-preserve-root", "ls"}
 			for _, s := range samples {
 				fmt.Printf("%q blocked=%v reason=%s\n", s, shell.IsBlocked(s), shell.BlockReason(s))
@@ -65,7 +67,6 @@ func main() {
 	sessionID := fmt.Sprintf("%d", time.Now().Unix())
 	workspace := filepath.Join(bank.WorkspacePrefix, sessionID)
 	if state != nil && state.Workspace != "" && !state.Submitted {
-		// Resume same workspace if still present
 		if st, err := os.Stat(state.Workspace); err == nil && st.IsDir() {
 			workspace = state.Workspace
 			sessionID = state.SessionID
@@ -73,12 +74,13 @@ func main() {
 			state = nil
 		}
 	} else if state != nil && state.Submitted {
-		state = nil // fresh after submit
+		state = nil
 	}
 	if state == nil {
 		state = progress.NewState(sessionID, workspace)
 	} else {
 		state.Workspace = workspace
+		state.EnsureMaps()
 	}
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "workspace: %v\n", err)
@@ -122,14 +124,16 @@ func printHelp() {
   PgUp/PgDn    Shell 回滚缓冲
   Ctrl+G       判当前题
   Ctrl+S       交卷（写入 IO history + JSON）
-  n / p        下一题 / 上一题（题目焦点）
+  a / Ctrl+A   输入简答（有 short_answer 的题目）
+  n / p        下一题 / 上一题（题目焦点；进入时自动跑 init）
   Ctrl+Q       退出（未交卷会确认）
   Ctrl+C       在 Shell 焦点下转发给 bash
-  Esc / Ctrl+[ Shell 焦点下发给 PTY（退出 vim 插入模式等）；退出程序请用 Ctrl+Q
+  Esc / Ctrl+[ Shell 焦点下发给 PTY；简答编辑时取消输入
 
 安全:
   禁止 dd / fdisk / cfdisk / parted / --no-preserve-root / rm -rf /
+  （题目 init 脚本不受学生黑名单限制）
 
-环境: Ubuntu 24.04 学生机；含 openssh-server 安装题（需 sudo）。
+环境: Ubuntu 24.04 学生机；含 openssh-server / systemctl 题（需 sudo）。
 `)
 }

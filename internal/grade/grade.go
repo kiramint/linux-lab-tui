@@ -21,19 +21,16 @@ type QuestionResult struct {
 	Checks     []CheckResult
 }
 
-// HistoryExtractor pulls command lines the student typed from IO history.
-// We look for lines after shell prompts or raw input records prefixed with "$ ".
+// ExtractTypedCommands pulls command lines the student typed from IO history.
 func ExtractTypedCommands(history string) []string {
 	var cmds []string
 	lines := strings.Split(history, "\n")
 	for _, line := range lines {
 		line = strings.TrimRight(line, "\r")
-		// Our shell pane prefixes sent commands as: >>> CMD
 		if strings.HasPrefix(line, ">>> ") {
 			cmds = append(cmds, strings.TrimPrefix(line, ">>> "))
 			continue
 		}
-		// Also accept classic PS1 capture: user@host:path$ cmd
 		if idx := strings.LastIndex(line, "$ "); idx >= 0 && idx+2 < len(line) {
 			rest := line[idx+2:]
 			if rest != "" && !strings.HasPrefix(rest, ">>>") {
@@ -44,10 +41,35 @@ func ExtractTypedCommands(history string) []string {
 	return cmds
 }
 
-func GradeQuestion(q Question, workspace, history string) QuestionResult {
+// RunInit executes the question's init script in workspace via bash -lc.
+// Init is NOT subject to the student command blocklist (dd allowed here).
+func RunInit(q Question, workspace string) error {
+	script := strings.TrimSpace(q.Init)
+	if script == "" {
+		return nil
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		return err
+	}
+	cmd := exec.Command("bash", "-lc", script)
+	cmd.Dir = workspace
+	cmd.Env = append(os.Environ(), "LINUX_LAB_WORKSPACE="+workspace)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return fmt.Errorf("%v", err)
+		}
+		return fmt.Errorf("%v: %s", err, truncate(msg, 200))
+	}
+	return nil
+}
+
+// GradeQuestion runs all graders. studentAnswer is used by short_answer graders.
+func GradeQuestion(q Question, workspace, history, studentAnswer string) QuestionResult {
 	res := QuestionResult{QuestionID: q.ID}
 	for _, g := range q.Graders {
-		cr := runGrader(g, workspace, history)
+		cr := runGrader(g, workspace, history, studentAnswer)
 		res.Checks = append(res.Checks, cr)
 	}
 	res.Passed = true
@@ -65,7 +87,7 @@ func GradeQuestion(q Question, workspace, history string) QuestionResult {
 	return res
 }
 
-func runGrader(g Grader, workspace, history string) CheckResult {
+func runGrader(g Grader, workspace, history, studentAnswer string) CheckResult {
 	switch strings.ToLower(g.Type) {
 	case "file":
 		return gradeFile(g, workspace)
@@ -73,9 +95,71 @@ func runGrader(g Grader, workspace, history string) CheckResult {
 		return gradeCommandRegex(g, history)
 	case "output":
 		return gradeOutput(g, workspace)
+	case "short_answer":
+		return gradeShortAnswer(g, workspace, studentAnswer)
 	default:
 		return CheckResult{OK: false, Message: fmt.Sprintf("unknown grader type %q", g.Type)}
 	}
+}
+
+func normalizeAnswer(s, mode string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "\n")
+	s = strings.TrimSpace(s)
+	switch strings.ToLower(mode) {
+	case "", "trim":
+		return s
+	default:
+		return s
+	}
+}
+
+func gradeShortAnswer(g Grader, workspace, studentAnswer string) CheckResult {
+	desc := g.Description
+	if desc == "" {
+		desc = "简答"
+	}
+	ans := normalizeAnswer(studentAnswer, g.Normalize)
+	if ans == "" {
+		return CheckResult{OK: false, Message: "未作答: " + desc}
+	}
+
+	if g.ExpectCommand != "" {
+		cmd := exec.Command("bash", "-lc", g.ExpectCommand)
+		// short_answer expect_command defaults to workspace cwd
+		cmd.Dir = workspace
+		cmd.Env = append(os.Environ(), "LINUX_LAB_WORKSPACE="+workspace)
+		out, err := cmd.CombinedOutput()
+		expected := normalizeAnswer(string(out), g.Normalize)
+		if err != nil && expected == "" {
+			return CheckResult{OK: false, Message: fmt.Sprintf("expect_command failed: %v", err)}
+		}
+		if ans == expected {
+			return CheckResult{OK: true, Message: "简答正确: " + desc}
+		}
+		return CheckResult{OK: false, Message: fmt.Sprintf("简答不符: %s (期望 %q 得到 %q)", desc, expected, ans)}
+	}
+
+	if g.ExpectExact != "" {
+		want := normalizeAnswer(g.ExpectExact, g.Normalize)
+		if ans == want {
+			return CheckResult{OK: true, Message: "简答正确: " + desc}
+		}
+		return CheckResult{OK: false, Message: fmt.Sprintf("简答不符: %s (期望 %q)", desc, want)}
+	}
+
+	if g.ExpectRegex != "" {
+		re, err := regexp.Compile(g.ExpectRegex)
+		if err != nil {
+			return CheckResult{OK: false, Message: fmt.Sprintf("bad expect_regex: %v", err)}
+		}
+		if re.MatchString(ans) {
+			return CheckResult{OK: true, Message: "简答正确: " + desc}
+		}
+		return CheckResult{OK: false, Message: "简答不符正则: " + desc}
+	}
+
+	return CheckResult{OK: false, Message: "short_answer 未配置期望值: " + desc}
 }
 
 func gradeFile(g Grader, workspace string) CheckResult {
@@ -127,12 +211,10 @@ func gradeFile(g Grader, workspace string) CheckResult {
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		mode := info.Mode().Perm()
 		if ok {
-			// Use permission bits only
 			_ = stat
 		}
 		want := strings.TrimPrefix(g.ModeOctal, "0")
 		got := fmt.Sprintf("%o", uint32(mode))
-		// Normalize to 3 or 4 digits
 		if !modeEqual(got, want) {
 			return CheckResult{OK: false, Message: fmt.Sprintf("mode %s want %s got %s", label, g.ModeOctal, got)}
 		}
@@ -141,7 +223,6 @@ func gradeFile(g Grader, workspace string) CheckResult {
 }
 
 func modeEqual(got, want string) bool {
-	// Compare last 3 octal digits
 	for len(got) < 3 {
 		got = "0" + got
 	}
@@ -175,7 +256,6 @@ func gradeCommandRegex(g Grader, history string) CheckResult {
 			return CheckResult{OK: true, Message: "matched: " + desc}
 		}
 	}
-	// Fallback: search whole history (prompts may wrap oddly)
 	if re.MatchString(history) {
 		return CheckResult{OK: true, Message: "matched in history: " + desc}
 	}

@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	ConfigDirName   = "linux-lab"
-	ProgressFile    = "progress.json"
-	SubmissionsDir  = "submissions"
+	ConfigDirName  = "linux-lab"
+	ProgressFile   = "progress.json"
+	SubmissionsDir = "submissions"
 )
 
 type QuestionResult struct {
@@ -21,15 +21,17 @@ type QuestionResult struct {
 }
 
 type State struct {
-	SessionID     string                    `json:"session_id"`
-	Workspace     string                    `json:"workspace"`
-	CurrentIndex  int                       `json:"current_index"`
-	Results       map[string]QuestionResult `json:"results"`
-	StartedAt     time.Time                 `json:"started_at"`
-	UpdatedAt     time.Time                 `json:"updated_at"`
-	Submitted     bool                      `json:"submitted"`
-	SubmitPath    string                    `json:"submit_path,omitempty"`
-	HistoryPath   string                    `json:"history_path,omitempty"`
+	SessionID    string                    `json:"session_id"`
+	Workspace    string                    `json:"workspace"`
+	CurrentIndex int                       `json:"current_index"`
+	Results      map[string]QuestionResult `json:"results"`
+	Inited       map[string]bool           `json:"inited,omitempty"`
+	Answers      map[string]string         `json:"answers,omitempty"`
+	StartedAt    time.Time                 `json:"started_at"`
+	UpdatedAt    time.Time                 `json:"updated_at"`
+	Submitted    bool                      `json:"submitted"`
+	SubmitPath   string                    `json:"submit_path,omitempty"`
+	HistoryPath  string                    `json:"history_path,omitempty"`
 }
 
 func ConfigDir() (string, error) {
@@ -83,6 +85,12 @@ func Load() (*State, error) {
 	if s.Results == nil {
 		s.Results = map[string]QuestionResult{}
 	}
+	if s.Inited == nil {
+		s.Inited = map[string]bool{}
+	}
+	if s.Answers == nil {
+		s.Answers = map[string]string{}
+	}
 	return &s, nil
 }
 
@@ -106,6 +114,8 @@ func NewState(sessionID, workspace string) *State {
 		Workspace:    workspace,
 		CurrentIndex: 0,
 		Results:      map[string]QuestionResult{},
+		Inited:       map[string]bool{},
+		Answers:      map[string]string{},
 		StartedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -119,4 +129,30 @@ func (s *State) PassedCount() int {
 		}
 	}
 	return n
+}
+
+// FormalPassedCount counts passed non-bonus questions; bonusIDs lists bonus question IDs.
+func (s *State) FormalPassedCount(bonusIDs map[string]bool) int {
+	n := 0
+	for id, r := range s.Results {
+		if bonusIDs[id] {
+			continue
+		}
+		if r.Passed {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *State) EnsureMaps() {
+	if s.Results == nil {
+		s.Results = map[string]QuestionResult{}
+	}
+	if s.Inited == nil {
+		s.Inited = map[string]bool{}
+	}
+	if s.Answers == nil {
+		s.Answers = map[string]string{}
+	}
 }

@@ -7,6 +7,9 @@
 - **工作区**：`/tmp/linux-lab-<session>/`  
 - **进度**：`~/.config/linux-lab/progress.json`  
 - **交卷**：完整虚拟终端 IO history + 每题 PASS/FAIL JSON  
+- **题目 init**：进入关卡时自动铺垫文件/后台进程  
+- **简答**：`a` / `Ctrl+A` 提交（如 `du -hs` 大小）  
+- **附加题**：`bonus` 标记，正式进度单独统计  
 
 面向 **Ubuntu 24.04** 学生环境。
 
@@ -22,11 +25,11 @@ GitHub Actions 会在推送 `v*` 标签时交叉编译 **linux/amd64** 与 **lin
 
 ```bash
 # AMD64（常见 x86_64 Ubuntu / 云主机）
-curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.2/linux-lab-linux-amd64
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.2.0/linux-lab-linux-amd64
 chmod +x linux-lab-linux-amd64 && ./linux-lab-linux-amd64
 
 # ARM64（树莓派 / 部分云主机）
-curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.1.2/linux-lab-linux-arm64
+curl -LO https://github.com/kiramint/linux-lab-tui/releases/download/v0.2.0/linux-lab-linux-arm64
 chmod +x linux-lab-linux-arm64 && ./linux-lab-linux-arm64
 ```
 
@@ -67,11 +70,12 @@ CI（`.github/workflows/ci.yml`）在 `main` 的 push/PR 上会跑 `go test ./..
 | `PgUp` / `PgDn` | Shell 回滚缓冲（查看已滚出屏幕的行） |
 | `Ctrl+G` | 判当前题 |
 | `Enter` / `c` | 判当前题（题目焦点） |
-| `n` / `p` | 下一题 / 上一题 |
+| `a` / `Ctrl+A` | 输入简答（有 short_answer 的题） |
+| `n` / `p` | 下一题 / 上一题（进入时自动跑 init） |
 | `Ctrl+S` 或 `s` | 交卷 |
 | `Ctrl+Q` | 退出（未交卷会确认） |
 | `Ctrl+C` | Shell 焦点下发送给 bash |
-| `Esc` / `Ctrl+[` | Shell 焦点下发给 PTY（不会退出程序或切焦点） |
+| `Esc` / `Ctrl+[` | Shell 焦点下发给 PTY；简答编辑时取消 |
 
 聚焦 Shell 时右边框高亮，并显示闪烁块光标。
 
@@ -86,9 +90,9 @@ CI（`.github/workflows/ci.yml`）在 `main` 的 push/PR 上会跑 `go test ./..
 
 ## 题目一览
 
-内容覆盖：路径、文件操作、查看/搜索、管道重定向、权限与 chmod、whoami/id、环境变量、进程、tar、apt、**安装 openssh-server**、systemctl 检查 SSH、find 综合。
+内容覆盖：路径与文件、查看/搜索、管道重定向、权限与 chmod -R、chown/chgrp、ACL 附加、环境变量、进程（htop/PID）、tar、apt、**openssh-server**、systemctl enable/start/stop/status、scp、du/df/lsof、find 综合。
 
-`Q12-openssh-server`、部分检查需要 **sudo**；请在真实 Ubuntu 24.04 虚拟机/实验机上完成：
+`Q11-openssh-server`、`Q12-systemctl-ssh` 等需要 **sudo**；请在真实 Ubuntu 24.04 虚拟机/实验机上完成：
 
 ```bash
 sudo apt-get update

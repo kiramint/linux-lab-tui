@@ -4,6 +4,8 @@
 
 题源参考：[VLA-Tutorial-AGDR 第二章「Linux终端操作」](https://github.com/GC-SHIRO/VLA-Tutorial-AGDR/tree/main/2.%20Linux%E7%BB%88%E7%AB%AF%E6%93%8D%E4%BD%9C)（含 [05-用户与权限.ipynb](https://github.com/GC-SHIRO/VLA-Tutorial-AGDR/blob/main/2.%20Linux%E7%BB%88%E7%AB%AF%E6%93%8D%E4%BD%9C/05-%E7%94%A8%E6%88%B7%E4%B8%8E%E6%9D%83%E9%99%90.ipynb)）。
 
+当前版本：**0.2.0**（支持每题 `init`、简答 `short_answer`、`bonus` 附加题）。
+
 ---
 
 ## 1. 题目放在哪
@@ -13,7 +15,9 @@
 | `quests/chapter2.yaml` | 当前唯一题库（章节元数据 + `questions` 列表） |
 | `main.go` 的 `//go:embed quests/chapter2.yaml` | 编译进二进制；**改 YAML 后必须重新 `make build` 才生效** |
 | `internal/grade/quest.go` | `Bank` / `Question` / `Grader` 字段定义 |
-| `internal/grade/grade.go` | 三种判题实现；一题内多个 grader **全部通过** 才 PASS |
+| `internal/grade/grade.go` | 判题实现（`file` / `command_regex` / `output` / `short_answer`）+ `RunInit` |
+| `internal/progress/progress.go` | 进度：`Results`、`Inited`、`Answers` |
+| `internal/tui/model.go` | 切题跑 init、简答输入、附加题展示 |
 
 工作区前缀来自 YAML 顶层 `workspace_prefix`（默认 `/tmp/linux-lab`），运行时会变成 `/tmp/linux-lab-<session>/`。题面里的相对路径都相对该工作区。Shell 启动时已 `cd` 到工作区，并设环境变量 `LINUX_LAB_WORKSPACE`。
 
@@ -28,7 +32,13 @@
   title: "简短标题"         # 左侧列表显示
   section: "05 用户与权限"  # 分组标签
   needs_sudo: false         # true 时 UI 会标 [sudo]
-  instructions: |           # 多行题面（支持 $LINUX_LAB_WORKSPACE 说明）
+  bonus: false              # true 时 list/UI 标 [附加]；正式通过数不含附加
+  answer_prompt: ""         # 非空则提示学生按 a/Ctrl+A 输入简答
+  init: |                   # 可选：进入本题时自动执行的 bash（cwd=工作区）
+    mkdir -p demo
+    echo x > demo/a.txt
+  init_once: true           # 默认 true；同一 session 同一题只跑一次
+  instructions: |           # 多行题面
     在工作区完成……
   graders:                  # 非空；全部 OK 才算通过
     - type: file
@@ -44,9 +54,36 @@ workspace_prefix: "/tmp/linux-lab"
 questions: [ ... ]
 ```
 
+### 2.1 `init` — 题目初始化脚本
+
+- 由程序用 `bash -lc` 在**工作区**执行（`Dir=workspace`，并设置 `LINUX_LAB_WORKSPACE`）。
+- **不经过学生 PTY**，因此**不受学生命令黑名单限制**（init 里可用 `dd` 造大文件）。
+- 默认 `init_once: true`：每个题 ID 每个 session 只成功初始化一次（进度里 `Inited` 记录）。
+- 触发时机：首次显示当前题（启动）、以及 `n`/`p` 切到该题时。
+- 失败时状态栏：`初始化失败: …`；成功：`已初始化环境`。
+- 后台辅助进程（如 sleep / lsof holder）：把 PID 写到 `.lab/qXX.pid`，题面说明进程名；init 应幂等（pid 仍存活则跳过）。
+- **后台进程必须用 `setsid ... &`**（并重定向 stdin/stdout/stderr），否则 `RunInit` 的 `bash -lc` 会一直等到该进程结束才返回。
+- **安全**：只在工作区内操作，禁止抹盘/`rm -rf /` 等。
+
+### 2.2 `bonus` — 附加题
+
+- `bonus: true` → `./linux-lab list` 与左侧题面显示 `[附加]`。
+- 进度条「正式 X/Y」不含附加；附加仍可判题、仍写入 Results。
+
+### 2.3 简答键位
+
+| 键 | 作用 |
+|----|------|
+| `a`（题目焦点） | 进入简答编辑 |
+| `Ctrl+A`（全局） | 同上 |
+| `Enter` | 保存到 `Answers[题ID]` |
+| `Esc` | 取消编辑 |
+
+左侧显示当前已保存答案。`Ctrl+G` 判题时把该答案交给 `short_answer` grader。
+
 ---
 
-## 3. 三种 grader（`type`）
+## 3. 四种 grader（`type`）
 
 ### 3.1 `file` — 文件是否存在 / 内容 / 权限
 
@@ -59,28 +96,17 @@ questions: [ ... ]
 | `mode_octal` | 如 `"0700"`，只比权限三位 |
 
 ```yaml
-# 必须存在且内容含 ERROR
 - type: file
   path: workspace/errors.txt
   exists: true
   content_regex: '(?m)ERROR'
 
-# 必须已删除
 - type: file
   path: practice/docs/readme.txt
   exists: false
-
-# 目录 + 权限脚本
-- type: file
-  path: scripts/hello.sh
-  exists: true
-  content_regex: '(?i)echo.*hi'
-  mode_octal: "0700"
-
-- type: file
-  path: practice/docs
-  is_dir: true
 ```
+
+`struct` 里还有 `mode_regex` 字段，**当前 `gradeFile` 未实现**，不要依赖。
 
 ### 3.2 `command_regex` — 学生是否输入过某类命令
 
@@ -95,10 +121,6 @@ questions: [ ... ]
 - type: command_regex
   pattern: '(?i)\bgrep\b.*ERROR'
   description: "曾执行含 ERROR 的 grep"
-
-- type: command_regex
-  pattern: '(?m)^\s*whoami\s*$'
-  description: "执行过 whoami"
 ```
 
 注意：只匹配**发到 PTY 的整行**；在 vim 里敲的内容、未回车的半行不会进 `>>>` 记录。
@@ -112,7 +134,7 @@ questions: [ ... ]
 | `command` | 要执行的命令 |
 | `cwd_workspace` | `true` 时在工作区目录执行 |
 | `stdout_regex` | 匹配合并后的 stdout+stderr |
-| `stdout_exact` | 与 trim 后全文精确相等（与 regex 二选一即可） |
+| `stdout_exact` | 与 trim 后全文精确相等 |
 | `description` | 人类可读说明 |
 
 ```yaml
@@ -121,15 +143,35 @@ questions: [ ... ]
   cwd_workspace: true
   stdout_regex: '(?m)^[0-7][0-7][4567]$'
   description: "others 具有读权限"
-
-- type: output
-  command: "dpkg -l openssh-server"
-  cwd_workspace: false
-  stdout_regex: '(?m)^ii\s+openssh-server'
-  description: "dpkg 显示已安装"
 ```
 
-`struct` 里还有 `mode_regex` 字段，**当前 `gradeFile` 未实现**，不要依赖。
+### 3.4 `short_answer` — 学生键入的简答
+
+配合 `answer_prompt` 与 UI 简答框。空答案 → FAIL「未作答」。
+
+| 字段 | 说明 |
+|------|------|
+| `expect_command` | **推荐**：在工作区跑命令，stdout trim 后与学生答案比 |
+| `expect_exact` | 与答案精确相等（先 normalize） |
+| `expect_regex` | 答案匹配该正则 |
+| `normalize` | 默认/`trim`：去首尾空白与换行 |
+| `description` | 说明 |
+
+优先级：有 `expect_command` 时以命令输出为准；否则 `expect_exact`；否则 `expect_regex`。
+
+```yaml
+answer_prompt: "请输入 du -hs bigdir 的第一列大小（如 2.0M）"
+graders:
+  - type: command_regex
+    pattern: '(?i)du\s+-hs\b'
+    description: "执行过 du -hs"
+  - type: short_answer
+    expect_command: "du -hs bigdir | awk '{print $1}'"
+    normalize: trim
+    description: "目录大小"
+```
+
+动态题（du/df）务必用 `expect_command`，避免写死机器相关数值。
 
 ---
 
@@ -137,17 +179,17 @@ questions: [ ... ]
 
 ### 新增一题
 
-1. 在 `quests/chapter2.yaml` 的 `questions:` 末尾（或目标位置）追加一个 `- id: ...` 块。
-2. 选好 `graders`（可多条混用，见下）。
+1. 在 `quests/chapter2.yaml` 的 `questions:` 目标位置追加 `- id: ...`。
+2. 需要铺垫文件时写 `init:`；需要学生填数字/字符串时写 `answer_prompt` + `short_answer`。
 3. `id` 勿与已有重复；改 `id` 会导致旧进度对不上。
 4. 本地验证（见 §5）→ commit → 需要发二进制时再打 tag（见 §7）。
 
 ### 改题面 / 难度
 
 - 只改文案：动 `title` / `instructions` / `section`。
-- 加难：收紧 `content_regex` / `pattern`，或增加 grader。
-- 变易：放宽正则，或删掉过严的 `command_regex`（只留文件结果也可）。
-- 需 sudo 的关卡设 `needs_sudo: true`，并在题面写清；CI/无 sudo 环境预期会 FAIL（见 `Q12-openssh-server`）。
+- 加难：收紧正则，或增加 grader。
+- 变易：放宽正则，或用 `init` 减少前置手工。
+- 需 sudo 的关卡设 `needs_sudo: true`。
 
 ### 调顺序
 
@@ -155,43 +197,27 @@ questions: [ ... ]
 
 ### 一题多 grader
 
-列表里**每一条都要 OK**（逻辑与）。典型组合：
-
-```yaml
-graders:
-  - type: file
-    path: archive/backup.tar.gz
-    exists: true
-  - type: command_regex
-    pattern: '(?i)\btar\b.*\b(czf|-czf)'
-    description: "使用 tar 创建过 gzip 归档"
-  - type: output
-    command: "tar -tzf archive/backup.tar.gz"
-    cwd_workspace: true
-    stdout_regex: '.+'
-    description: "归档可列出内容"
-```
+列表里**每一条都要 OK**（逻辑与）。典型组合：`init` 铺垫 + `command_regex` + `file`/`output`/`short_answer`。
 
 ---
 
 ## 5. 本地验证
 
 ```bash
-make test          # go test ./...（含 ParseBank / 各 grader 单测）
+make test          # go test ./...（含 ParseBank / RunInit / short_answer）
 make build         # 重新 embed YAML → ./linux-lab
-make list          # 或 ./linux-lab list —— 确认 id/标题/顺序/[sudo]
-./linux-lab test-blocklist   # 安全拦截自检（与题库无关）
-./linux-lab        # 手动干跑：做一题 → Ctrl+G 看判题结果
+make list          # 或 ./linux-lab list —— 确认 id/标题/顺序/[sudo]/[附加]
+./linux-lab test-blocklist
+./linux-lab        # 干跑：切题看 init → a 简答 → Ctrl+G
 ```
 
 干跑提示：
 
-- 工作区在 `/tmp/linux-lab-<session>/`；进度在 `~/.config/linux-lab/progress.json`。
+- 工作区在 `/tmp/linux-lab-<session>/`；进度在 `~/.config/linux-lab/progress.json`（含 `inited`、`answers`）。
 - 交过卷（Ctrl+S）后再启动会开新 session；未交卷且工作区还在会续用同一目录。
-- 测 `command_regex` 时必须在右侧 shell **回车发送**整行，否则 history 无 `>>>`。
-- 测 `output`/`dpkg`/`systemctl` 类题目需要真实 Ubuntu 包/服务；开发机没有则 FAIL 正常。
-
-可选：在 `internal/grade` 加表驱动测试，用临时目录 + 伪造 history 字符串覆盖新正则。
+- 测 `command_regex` 时必须在右侧 shell **回车发送**整行。
+- 测 `output`/`dpkg`/`systemctl` 类题目需要真实 Ubuntu 包/服务。
+- 后台进程题（Q08/Q16）依赖 init 拉起的 helper；重复进入同 session 应幂等。
 
 ---
 
@@ -203,13 +229,13 @@ make list          # 或 ./linux-lab list —— 确认 id/标题/顺序/[sudo]
 - `--no-preserve-root`
 - 危险的 `rm -rf /`（及类似写法）
 
-改拦截规则：改 Go 里的 `blockPatterns`，并补 `internal/shell/blocklist_test.go`，再 `make test`。
+**例外**：题目 `init` 在 grader 进程内执行，**不走**黑名单（可 `dd` 造 `bigdir`）。
 
 出题时注意：
 
-- **不要**在 `instructions` 里示范被拦命令。
-- **不要**在 `output.command` 里跑破坏性命令（grader 会真执行）。
-- `output.command` 保持只读探测（`stat` / `dpkg -l` / `tar -tzf` / `systemctl is-active` 等）。
+- **不要**在 `instructions` 里示范被拦命令（除非说明「init 已造好」）。
+- **不要**在 `output.command` / `expect_command` 里跑破坏性命令。
+- `init` 只写工作区相对路径。
 
 ---
 
@@ -217,7 +243,7 @@ make list          # 或 ./linux-lab list —— 确认 id/标题/顺序/[sudo]
 
 1. `make test && make build && ./linux-lab list`
 2. Commit 并 push 到 `main`（CI 会跑 test + build）。
-3. **只有需要更新学生下载的二进制时**再发版：
+3. **需要更新学生下载的二进制时**再发版：
    ```bash
    git tag v0.x.y && git push origin v0.x.y
    ```
@@ -226,22 +252,30 @@ make list          # 或 ./linux-lab list —— 确认 id/标题/顺序/[sudo]
 
 ---
 
-## 速查：最小新题模板
+## 速查：带 init + 简答的模板
 
 ```yaml
   - id: Q15-short-name
     title: "一句话标题"
     section: "综合"
     needs_sudo: false
+    bonus: false
+    answer_prompt: "请输入 ……"
+    init: |
+      mkdir -p out
+      echo ready > out/seed.txt
     instructions: |
       1. ……
-      2. 完成后 Ctrl+G 判题。
+      2. 简答用 a / Ctrl+A；完成后 Ctrl+G。
     graders:
-      - type: file
-        path: out/result.txt
-        exists: true
-        content_regex: 'ok'
       - type: command_regex
         pattern: '(?i)\becho\b'
         description: "使用过 echo"
+      - type: file
+        path: out/result.txt
+        exists: true
+      - type: short_answer
+        expect_command: "cat out/seed.txt"
+        normalize: trim
+        description: "seed 内容"
 ```
